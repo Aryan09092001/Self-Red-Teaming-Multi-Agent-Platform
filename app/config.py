@@ -85,3 +85,9 @@ class Config:  # typed accessor over the secret dict, built once at import/start
             os.environ["LANGCHAIN_API_KEY"] = self.langsmith_api_key  # auth for the tracing backend
             os.environ["LANGCHAIN_PROJECT"] = self.langchain_project  # groups traces under one project
             os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"  # hosted LangSmith ingest URL
+
+
+# Purpose: single source of truth for runtime configuration. Every setting is pulled
+# once from AWS Secrets Manager ("research-agent/config"), cached for the process, and
+# exposed as typed attributes on Config, so no secrets live in code, env files, or images.
+# Required keys raise KeyError at startup; optional ones fall back to the defaults above.
