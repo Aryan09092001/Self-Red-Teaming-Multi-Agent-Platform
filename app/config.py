@@ -6,7 +6,7 @@ from functools import lru_cache  # cache the secret fetch so we call AWS once
 
 
 @lru_cache(maxsize=1)  # one cached result for the whole process lifetime
-def _load_secret() -> dict:  # pulls all config from AWS Secrets Manager
+def _load_secret() -> dict:  # PURPOSE: fetch the whole config blob from AWS Secrets Manager once and hand back a plain dict
     region = os.environ.get("AWS_REGION", "us-east-1")  # env wins, else default region
     client = boto3.client("secretsmanager", region_name=region)  # Secrets Manager client
     response = client.get_secret_value(SecretId="research-agent/config")  # fetch the secret blob
@@ -14,7 +14,7 @@ def _load_secret() -> dict:  # pulls all config from AWS Secrets Manager
 
 
 class Config:  # typed accessor over the secret dict, built once at import/startup
-    def __init__(self):  # every attribute below is read from the secret
+    def __init__(self):  # PURPOSE: turn the secret dict into typed attributes with defaults; every attribute below is read from the secret
         data = _load_secret()  # cached, so repeated Config() costs no AWS call
 
         # AWS

@@ -4,7 +4,7 @@ import logging  # warn on each failed attempt so retries are visible in logs
 logger = logging.getLogger(__name__)  # module-scoped logger, named "app.retry"
 
 
-async def with_retry(coro_fn, max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0):  # coro_fn is a zero-arg callable, not an awaited coroutine
+async def with_retry(coro_fn, max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0):  # PURPOSE: run any flaky async call again on failure with growing waits; coro_fn is a zero-arg callable, not an awaited coroutine
     """Call coro_fn() with exponential backoff. Raises the last exception if all retries fail."""
     last_exc = None  # holds the most recent failure, re-raised if every attempt fails
     wait = delay  # current sleep, multiplied by backoff after each failure
