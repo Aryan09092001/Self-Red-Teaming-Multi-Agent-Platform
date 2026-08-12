@@ -9,8 +9,10 @@ terraform {
       version = "~> 3.0"
     }
   }
+  # Bucket name must match the one bootstrap.sh creates (account id suffixed,
+  # because S3 names are globally unique). Backend blocks cannot use variables.
   backend "s3" {
-    bucket         = "research-agent-tfstate"
+    bucket         = "research-agent-tfstate-357365535035"
     key            = "terraform.tfstate"
     region         = "us-east-1"
     dynamodb_table = "research-agent-tf-locks"
@@ -84,6 +86,13 @@ variable "db_instance_class" {
 variable "db_multi_az" {
   description = "Enable RDS Multi-AZ for high availability"
   default     = false
+}
+
+# AWS Free Tier plan accounts cap this at 1 day; anything higher fails with
+# FreeTierRestrictionError. Raise to 7+ once the account is on a paid plan.
+variable "db_backup_retention_days" {
+  description = "RDS automated backup retention in days (max 1 on the AWS free tier)"
+  default     = 1
 }
 
 variable "redis_node_type" {
@@ -452,7 +461,7 @@ resource "aws_db_instance" "postgres" {
   deletion_protection     = false 
   skip_final_snapshot     = false
   final_snapshot_identifier = "${var.project}-postgres-final-snapshot"
-  backup_retention_period = 7
+  backup_retention_period = var.db_backup_retention_days
   backup_window           = "03:00-04:00"
   maintenance_window      = "sun:05:00-sun:06:00"
   tags                    = { Name = "${var.project}-postgres" }

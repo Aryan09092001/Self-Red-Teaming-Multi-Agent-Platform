@@ -2,20 +2,31 @@
 set -e
 
 REGION=${1:-us-east-1}
-BUCKET="research-agent-tfstate"
+# S3 bucket names are globally unique across all AWS accounts, so the account id
+# is appended to keep this one ours. Must match the backend block in terraform/main.tf.
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+BUCKET="research-agent-tfstate-${ACCOUNT_ID}"
 TABLE="research-agent-tf-locks"
 
 echo "Creating S3 bucket: $BUCKET in region: $REGION"
 
 if [ "$REGION" = "us-east-1" ]; then
-  aws s3api create-bucket \
-    --bucket "$BUCKET" \
-    --region "$REGION" 2>/dev/null && echo "Bucket created." || echo "Bucket already exists, continuing."
+  CREATE_ERR=$(aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" 2>&1 >/dev/null) || true
 else
-  aws s3api create-bucket \
-    --bucket "$BUCKET" \
-    --region "$REGION" \
-    --create-bucket-configuration LocationConstraint="$REGION" 2>/dev/null && echo "Bucket created." || echo "Bucket already exists, continuing."
+  CREATE_ERR=$(aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
+    --create-bucket-configuration LocationConstraint="$REGION" 2>&1 >/dev/null) || true
+fi
+
+# Only "we already own it" is safe to ignore. Anything else (name taken by another
+# account, bad credentials, wrong region) must stop the script, not be swallowed.
+if [ -z "$CREATE_ERR" ]; then
+  echo "Bucket created."
+elif echo "$CREATE_ERR" | grep -q "BucketAlreadyOwnedByYou"; then
+  echo "Bucket already exists and is owned by this account, continuing."
+else
+  echo "ERROR: could not create bucket $BUCKET" >&2
+  echo "$CREATE_ERR" >&2
+  exit 1
 fi
 
 echo "Enabling versioning on S3 bucket..."

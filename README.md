@@ -1,8 +1,14 @@
-# AI-Security-Project
+# Self-Red-Teaming Multi-Agent AI Research Platform
 
-A production-style **multi-agent research agent** on AWS, built with defence in depth and a red-team harness that continuously attacks it.
+**AWS Bedrock Guardrails · TensorZero LLM Gateway · STM/LTM Memory · Semantic Caching · PyRIT Red Teaming**
 
-The system takes a research topic, runs it through a four-agent LangGraph pipeline, and returns a structured report. Every request is screened by Bedrock Guardrails on the way in and on the way out, every report is scored by four LLM judges, and a separate PyRIT service runs jailbreak, prompt-injection, crescendo and skeleton-key attacks against the live API to prove the guardrails hold.
+A production-grade autonomous research platform that **continuously attacks itself** to prove its own defences hold.
+
+A four-agent LangGraph pipeline (Search → Summarize → Write → Verify) takes any topic end-to-end and returns a structured report. Every request passes through AWS Bedrock Guardrails on the way in and on the way out, routed via a TensorZero LLM gateway with GPT-4o and a Groq fallback, backed by a three-tier memory system: Redis session memory (STM), pgvector long-term memory (LTM), and a semantic cache that skips the pipeline entirely when a similar topic has already been researched.
+
+Every report is automatically scored by four LLM judges via LangSmith. Separately, a deployed PyRIT service runs jailbreak, XPIA, crescendo and skeleton-key attacks against the **live** API on a weekly schedule — not a test suite in CI, but a running adversary hitting the same load balancer a real attacker would.
+
+Full AWS infrastructure provisioned with Terraform, deployed via GitHub Actions CI/CD with automatic rollback.
 
 ---
 

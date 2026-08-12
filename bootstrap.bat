@@ -2,16 +2,27 @@
 setlocal
 
 set REGION=us-east-1
-set BUCKET=research-agent-tfstate
+rem S3 bucket names are globally unique across all AWS accounts, so the account id
+rem is appended to keep this one ours. Must match the backend block in terraform\main.tf.
+for /f "delims=" %%i in ('aws sts get-caller-identity --query Account --output text') do set ACCOUNT_ID=%%i
+set BUCKET=research-agent-tfstate-%ACCOUNT_ID%
 set TABLE=research-agent-tf-locks
 
 echo Creating S3 bucket: %BUCKET% in region: %REGION%
 
-aws s3api create-bucket --bucket %BUCKET% --region %REGION% 2>nul
+rem Only "we already own it" is safe to ignore. Any other failure (name taken by
+rem another account, bad credentials) must stop the script, not be swallowed.
+aws s3api create-bucket --bucket %BUCKET% --region %REGION% 2>"%TEMP%\tfboot_err.txt"
 if %errorlevel% equ 0 (
     echo Bucket created.
 ) else (
-    echo Bucket already exists, continuing.
+    findstr /C:"BucketAlreadyOwnedByYou" "%TEMP%\tfboot_err.txt" >nul
+    if errorlevel 1 (
+        echo ERROR: could not create bucket %BUCKET%
+        type "%TEMP%\tfboot_err.txt"
+        exit /b 1
+    )
+    echo Bucket already exists and is owned by this account, continuing.
 )
 
 echo Enabling versioning...
