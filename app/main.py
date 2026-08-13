@@ -141,10 +141,23 @@ async def lifespan(app: FastAPI):  # PURPOSE: startup and shutdown hooks; everyt
 
 
 app = FastAPI(title="Research Agent API", lifespan=lifespan)  # the ASGI app uvicorn serves
+@app.middleware("http")
+async def handle_head_requests(request, call_next):
+    # Convert HEAD -> GET so endpoints that only implement GET still respond to HEAD.
+    # After getting the response, remove the body for HEAD semantics.
+    if request.method == "HEAD":
+        # temporarily change the method to GET for routing
+        request.scope["method"] = "GET"
+        response = await call_next(request)
+        # ensure no body is returned for HEAD and adjust Content-Length
+        response.body = b""
+        response.headers["content-length"] = "0"
+        return response
+    return await call_next(request)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # ponytail: wide open, restrict to the real frontend origin before production
-    allow_methods=["GET", "POST"],  # only the verbs this API actually uses
+    allow_methods=["GET", "POST", "HEAD"],  # only the verbs this API actually uses
     allow_headers=["*"],  # must permit X-API-Key
 )
 
