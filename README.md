@@ -32,10 +32,12 @@ Add the ordinary production problems — a provider goes down mid-request, secre
 |---|---|---|
 | Model produces harmful output | Bedrock Guardrails on **input and output**, both directions | [Guardrails](#1-guardrails--blocked-at-the-door) |
 | Guardrails silently regress | PyRIT harness attacks the **live endpoint**, weekly on a schedule | [Red teaming](#2-red-teaming--12-attacks-10-blocked) |
-| Quality is unmeasurable | 4 LLM judges score **every** request, no sampling | [LangSmith](#6-langsmith--every-run-traced-and-scored) |
+| Quality is unmeasurable | 4 LLM judges score **every** request, no sampling | [LangSmith](#7-langsmith--every-run-traced-and-scored) |
 | One-shot answers are shallow | 4 agents + a critic that can reject and force a retry | [The four agents](#the-four-agents) |
-| Same question re-answered from scratch | Semantic cache (short-term) → pgvector recall (long-term) | [STM](#3-short-term-memory--the-agent-remembers-the-conversation) · [LTM](#4-long-term-memory--the-agent-remembers-last-week) |
-| Provider outage kills the app | TensorZero gateway, automatic fallback to a second provider | [Gateway](#5-llm-gateway--one-provider-is-a-single-point-of-failure) |
+| Same question re-asked in different words | Semantic cache on embeddings, not string equality | [Semantic cache](#3-semantic-cache--different-words-same-answer-zero-cost) |
+| Agent forgets the conversation | Redis session memory fed into the search agent | [STM](#4-short-term-memory--the-agent-remembers-the-conversation) |
+| Agent forgets what it said last week | pgvector recall + report diffing | [LTM](#5-long-term-memory--the-agent-remembers-last-week) |
+| Provider outage kills the app | TensorZero gateway, automatic fallback to a second provider | [Gateway](#6-llm-gateway--one-provider-is-a-single-point-of-failure) |
 | Deploys are manual and risky | 952 lines of Terraform, CI/CD with automatic rollback | `terraform apply` + `git push` |
 
 **The product on top:** give it a research topic, get a structured report — safety-checked, cached, remembered, and diffable against what it told you last time.
@@ -163,7 +165,24 @@ Blocked attacks are rejected in **~0.2-0.3s** — the guardrail short-circuits b
 7 run / 6 blocked and 5 run / 4 blocked respectively — consistent with the per-class numbers above.
 </details>
 
-## 3. Short-term memory — the agent remembers the conversation
+## 3. Semantic cache — different words, same answer, zero cost
+
+Tier 1 of the lookup. The cache is keyed on the **embedding** of the topic, not the string, so two differently-phrased questions that mean the same thing hit the same entry (cosine similarity ≥ 0.85, 1-hour TTL).
+
+Two reports exported from the deployed app, submitted as two separate jobs:
+
+| | Topic submitted | Report |
+|---|---|---|
+| [semantic-caching.pdf](result/semantic-caching.pdf) | `"Explain Artificial Intelligence?"` | Full report |
+| [semantic-caching-same-result.pdf](result/semantic-caching-same-result.pdf) | `"Hey can you explain about artificial intelligence?"` | **Byte-identical** |
+
+Different wording, different length, different phrasing — *"Explain Artificial Intelligence?"* vs *"Hey can you explain about artificial intelligence?"*. Every word of the body is the same, down to the Executive Summary, all five Key Findings, the Analysis, and the Conclusion. A string-keyed cache would have missed completely and paid for a second full pipeline run; the embedding-keyed one recognised them as the same question.
+
+**What that saves:** a Tier 3 miss costs 4 LLM calls minimum (~29s, per the trace below) and up to double that when the critic forces a retry. A Tier 1 hit costs one embedding call and a Redis `GET`. The second PDF is that saving, made visible.
+
+Cache writes are guarded: only freshly generated, **output-guardrail-passed** reports are ever cached ([app/main.py:104](app/main.py#L104)), so a blocked report can never be served to a later user from cache.
+
+## 4. Short-term memory — the agent remembers the conversation
 
 Session state in Redis: last 5 turns, 30-minute TTL, 500 chars per message. `SearchAgent` receives the last 4 turns, so a follow-up question is interpreted in context rather than cold.
 
@@ -173,7 +192,7 @@ The thread above is one session: *"tell me about Artificial Intelligence?"* → 
 
 You can also read it back over the API — `GET /session/<session_id>` returns the turns.
 
-## 4. Long-term memory — the agent remembers last week
+## 5. Long-term memory — the agent remembers last week
 
 Reports are embedded and stored in Postgres with pgvector (IVFFlat index). On a new request the system searches for semantically similar prior reports and does two distinct things with what it finds:
 
@@ -183,12 +202,12 @@ Reports are embedded and stored in Postgres with pgvector (IVFFlat index). On a 
 
 **Diff** — because prior reports are stored, the system can show what actually changed:
 
-![Report diff](result/report-diff.png)
-![Report diff — analysis and conclusion](result/report-diff-analysis.png)
+![Report diff](result/LTM-report-diff.png)
+![Report diff — analysis and conclusion](result/LTM-report-diff-analysis.png)
 
 A real unified diff, section by section, between the stored report and the new one — Executive Summary, Key Findings, Analysis, Conclusion. Red is what the previous report said, green is current. This is the payoff of LTM: **not "here's a report", but "here's what's different since you last asked"**, which is the thing you actually want from repeated research.
 
-## 5. LLM gateway — one provider is a single point of failure
+## 6. LLM gateway — one provider is a single point of failure
 
 Every agent call goes through a TensorZero sidecar on `localhost:3000` rather than to OpenAI directly. Routing and fallback are configuration, not application code:
 
@@ -207,11 +226,11 @@ When OpenAI returns a quota error or rate-limits, the gateway routes to Groq wit
 
 *(No dashboard screenshot for this one — TensorZero's effect is visible in the traces below, where every agent span completes despite provider variability. The honest artifact here is the config, not a UI.)*
 
-## 6. LangSmith — every run traced and scored
+## 7. LangSmith — every run traced and scored
 
 **Every single job** is traced span-by-span and scored by four independent LLM judges. No sampling, no manual review.
 
-![LangSmith evaluation scores](result/langsmith-eval-scores.png)
+![LangSmith evaluation scores](result/langsmith-eval-report.png)
 
 | Judge | Score | Reads as |
 |---|---|---|
@@ -291,7 +310,7 @@ app/
 pyrit_dashboard/    Red team harness + zero-dependency UI           (377 lines)
 tensorzero/         Gateway routing config + prompt templates
 terraform/main.tf   Every AWS resource                              (952 lines)
-result/             Screenshots of every run shown above
+result/             Screenshots + exported PDFs of every run shown above
 .github/workflows/  Build → ECR → ECS with rollback
 index.html          Single-file frontend, no build step
 ```
@@ -459,6 +478,20 @@ aws secretsmanager delete-secret --secret-id "research-agent/config" \
 Type `yes` when prompted. This removes ECS, RDS, Redis, ALB, VPC, the Bedrock Guardrail, Secrets Manager, ECR repos — everything Terraform created.
 
 RDS has deletion protection on and takes a final snapshot (`research-agent-postgres-final-snapshot`) before it goes — intentional, so data isn't lost by accident. The state S3 bucket and DynamoDB lock table are created by `bootstrap.sh`, not Terraform, so delete those separately.
+
+---
+
+## Future improvements
+
+**Safer** — per-user API keys with individual revocation · stable cache keys (`hash()` is randomized per process, so keys drift across ECS tasks — [app/cache.py:32](app/cache.py#L32)) · SHA-256 instead of MD5 in [app/output.py:40](app/output.py#L40) · more PyRIT attack classes · close the XPIA bypass
+
+**More observable** — CloudWatch dashboards for cache hit rate, LTM hit rate, latency, and guardrail block rate · per-request token and cost tracking · alerting on error spikes, task restarts, Redis memory, and rising block rate
+
+**Smarter** — real web search in `SearchAgent` (Tavily / SerpAPI) · fact-checker agent · translator agent · executive-brief agent
+
+**More useful** — React or Next.js frontend with report history and comparison · scheduled recurring research · email and Slack delivery via SES / SNS
+
+Safer and observable first — they protect what's already running.
 
 ---
 
