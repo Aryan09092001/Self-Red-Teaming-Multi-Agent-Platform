@@ -16,29 +16,31 @@
 
 ## The problem
 
-Shipping an LLM feature is easy. Shipping one you'd let a stranger use is not. Three things break, and almost nothing on GitHub addresses any of them:
+> Any developer can call an API and get an AI response. **This project is about what happens after that.**
 
-**1. The model can be talked into things.** A user types a topic; that topic reaches a model that will cheerfully explain how to synthesize a nerve agent if you frame it as fiction. Bolting on a system prompt that says "be safe" is not a control — it's a suggestion. And even with a real guardrail, *how do you know it still works after today's deploy?*
+One API call gives you a demo. Turning that demo into something you'd let a stranger use surfaces eight separate problems. Most projects solve none of them. This one solves all eight, in one system, with evidence for each.
 
-**2. Nobody knows if the output is any good.** LLM quality is usually assessed by the developer reading a few outputs and deciding it "seems fine". That doesn't survive contact with a thousand users, and it doesn't detect the day a prompt change quietly makes reports 20% worse.
+| # | The problem | What you need | Built here |
+|:--:|---|---|---|
+| **1** | **Stop wasting money.** The same question asked 100 times should not cost 100× | Caching | [Semantic cache](#3-semantic-cache--different-words-same-answer-zero-cost) |
+| **2** | **Remember the conversation.** The AI should remember what it told you a minute ago | Short-term memory | [STM](#4-short-term-memory--the-agent-remembers-the-conversation) |
+| **3** | **Build on past research.** It should extend what it already knows, not restart from zero every time | Long-term memory | [LTM](#5-long-term-memory--the-agent-remembers-last-week) |
+| **4** | **One call is not enough.** A single shot doesn't produce a report worth reading | Multiple agents working together | [The four agents](#the-four-agents) |
+| **5** | **AI can be harmful or wrong.** It will produce harmful, biased, or false content if asked the right way | Safety layers | [Guardrails](#1-guardrails--blocked-at-the-door) |
+| **6** | **How do you know it's good?** "It seems fine when I read it" is not a measurement | Evaluation | [LLM judges](#7-langsmith--every-run-traced-and-scored) |
+| **7** | **Can it be manipulated?** Someone will try to jailbreak your system. Will you find out before they do? | Red teaming | [PyRIT harness](#2-red-teaming--12-attacks-10-blocked) |
+| **8** | **From laptop to production.** How does any of this reach AWS without manual steps? | CI/CD + infrastructure | `terraform apply` + `git push` |
 
-**3. It's slow and expensive by default.** A naive agent re-runs the entire pipeline for a question it answered an hour ago, and has no idea what it told you last week — so it can't tell you what changed.
+One more that isn't on that list but bites in production: **a provider goes down mid-request.** OpenAI rate-limits you and every request fails. That needs a [gateway with automatic fallback](#6-llm-gateway--one-provider-is-a-single-point-of-failure).
 
-Add the ordinary production problems — a provider goes down mid-request, secrets end up in a `.env` committed by accident, "it works on my machine" — and the gap between a notebook demo and a system is very wide.
-
-### What this solves
-
-| The problem | The mechanism | Evidence |
-|---|---|---|
-| Model produces harmful output | Bedrock Guardrails on **input and output**, both directions | [Guardrails](#1-guardrails--blocked-at-the-door) |
-| Guardrails silently regress | PyRIT harness attacks the **live endpoint**, weekly on a schedule | [Red teaming](#2-red-teaming--12-attacks-10-blocked) |
-| Quality is unmeasurable | 4 LLM judges score **every** request, no sampling | [LangSmith](#7-langsmith--every-run-traced-and-scored) |
-| One-shot answers are shallow | 4 agents + a critic that can reject and force a retry | [The four agents](#the-four-agents) |
-| Same question re-asked in different words | Semantic cache on embeddings, not string equality | [Semantic cache](#3-semantic-cache--different-words-same-answer-zero-cost) |
-| Agent forgets the conversation | Redis session memory fed into the search agent | [STM](#4-short-term-memory--the-agent-remembers-the-conversation) |
-| Agent forgets what it said last week | pgvector recall + report diffing | [LTM](#5-long-term-memory--the-agent-remembers-last-week) |
-| Provider outage kills the app | TensorZero gateway, automatic fallback to a second provider | [Gateway](#6-llm-gateway--one-provider-is-a-single-point-of-failure) |
-| Deploys are manual and risky | 952 lines of Terraform, CI/CD with automatic rollback | `terraform apply` + `git push` |
+```
+   Simple API call                      Production-ready system
+  ┌────────────────┐                 ┌──────────────────────────────────┐
+  │ user → API → 🤖│  ──────────────►│ caching · memory · long-term     │
+  └────────────────┘                 │ memory · multi-agent · safety    │
+                                     │ evaluation · red teaming · CI/CD │
+                                     └──────────────────────────────────┘
+```
 
 **The product on top:** give it a research topic, get a structured report — safety-checked, cached, remembered, and diffable against what it told you last time.
 
